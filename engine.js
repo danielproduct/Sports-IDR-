@@ -81,41 +81,78 @@ function normalizedClub(value) {
 
 export function scoreMatch(left, right) {
   const reasons = [];
-  if (left.uid === right.uid || left.source === right.source) {
-    return { eligible: false, score: 0, reasons: ['Same record or source'] };
-  }
-  const a = splitName(left.name);
-  const b = splitName(right.name);
-  const first = similarity(a.first, b.first);
-  const last = similarity(a.last, b.last);
-  if (last < 0.79 || first < 0.62) {
-    return { eligible: false, score: 0, reasons: ['Names do not provide enough evidence'] };
+  if (left.uid === right.uid) {
+    return { eligible: false, score: 0, reasons: ['Same record'] };
   }
   if (left.dob && right.dob && left.dob !== right.dob) {
     return { eligible: false, score: 0, reasons: ['Conflicting dates of birth'], conflict: true };
   }
+  // The POC expects external_id to identify a person in a SHARED namespace.
+  // Source-specific IDs belong in source_id, never in external_id.
   if (left.external_id && right.external_id && left.external_id !== right.external_id) {
     return { eligible: false, score: 0, reasons: ['Conflicting external identifiers'], conflict: true };
   }
+
+  const a = splitName(left.name);
+  const b = splitName(right.name);
+  const first = similarity(a.first, b.first);
+  const last = similarity(a.last, b.last);
   const matchingDob = Boolean(left.dob && right.dob && left.dob === right.dob);
   const matchingExternalId = Boolean(left.external_id && right.external_id && left.external_id === right.external_id);
   const matchingClub = Boolean(normalizedClub(left.club) && normalizedClub(left.club) === normalizedClub(right.club));
   const matchingPosition = Boolean(normalizePosition(left.position) && normalizePosition(left.position) === normalizePosition(right.position));
+  const exactName = Boolean(a.first && a.last && a.first === b.first && a.last === b.last);
+  const sameInitial = Boolean(a.first && b.first && a.first[0] === b.first[0]);
+  const standardName = first >= 0.62 && last >= 0.79;
+  const reversedName = Boolean(a.first && a.last && a.first === b.last && a.last === b.first);
+  const sharedIdNameChange = matchingDob && matchingExternalId && first >= 0.9;
+  const plausibleVariant = matchingDob && last >= 0.83 && sameInitial;
 
-  // Missing DOB is deliberately penalised; a strong name is never sufficient for an automatic merge.
+  // An exact DOB provides extra context for broadening review suggestions.
+  // Without matching DOB or shared person ID, require *exact* normalised first
+  // and surname, matching club and position; reject loose fuzzy-only evidence.
+  if (!standardName && !plausibleVariant && !reversedName && !sharedIdNameChange) {
+    return { eligible: false, score: 0, reasons: ['Names do not provide enough evidence'] };
+  }
+  if (!matchingDob && !matchingExternalId && !(exactName && matchingClub && matchingPosition)) {
+    return { eligible: false, score: 0, reasons: ['Insufficient evidence without matching date of birth'] };
+  }
+
+  const middleTokens = value => normalizeText(value).split(' ').filter(Boolean).slice(1, -1).join(' ');
+  const leftMiddle = middleTokens(left.name);
+  const rightMiddle = middleTokens(right.name);
+  if (!matchingDob && leftMiddle && rightMiddle && leftMiddle !== rightMiddle) {
+    return { eligible: false, score: 0, reasons: ['Conflicting additional name parts without DOB'] };
+  }
+
+  // Same-source duplicates are worth reviewing only with matching full DOB.
+  // Source record IDs remain distinct and an explicit review is required.
+  if (left.source === right.source && !(matchingDob && last >= 0.83 && sameInitial)) {
+    return { eligible: false, score: 0, reasons: ['Same source needs stronger identity evidence'] };
+  }
+
   const score = Math.min(100, Math.round((35 * last) + (25 * first) +
     (matchingDob ? 25 : 0) + (matchingClub ? 8 : 0) +
     (matchingPosition ? 7 : 0) + (matchingExternalId ? 20 : 0)));
   if (last === 1) reasons.push('Surname matches');
-  else reasons.push('Similar surname — check spelling');
-  if (first === 1) reasons.push(a.first === normalizeText(left.name).split(' ')[0] && b.first === normalizeText(right.name).split(' ')[0] ? 'First name matches' : 'Known first-name variant');
-  else reasons.push('Similar first name');
+  else if (last >= 0.79) reasons.push('Similar surname - check spelling');
+  else reasons.push('Surname differs - supporting ID evidence required');
+  if (first === 1) reasons.push('First name / known variant matches');
+  else if (first >= 0.62) reasons.push('Similar first name');
+  else reasons.push('First name variant or initials - confirm manually');
   if (matchingDob) reasons.push('Date of birth matches');
   else reasons.push('Date of birth missing from one or both sources');
   if (matchingClub) reasons.push('Club matches');
   if (matchingPosition) reasons.push('Position group matches');
-  if (matchingExternalId) reasons.push('External identifier matches');
-  return { eligible: score >= 64, score, reasons, tier: score >= 88 ? 'Strong candidate' : 'Needs review' };
+  if (matchingExternalId) reasons.push('Shared external identifier matches');
+  if (reversedName) reasons.push('First and last names may be reversed');
+  if (left.source === right.source) reasons.push('Potential duplicate within same source');
+
+  // The score is a sorting heuristic, never a calibrated match probability.
+  // Missing DOBs, same-source duplicates or nonstandard names demand extra care.
+  const strong = matchingDob && standardName && first >= 0.85 && last >= 0.90 &&
+    !reversedName && left.source !== right.source && !leftMiddle && !rightMiddle;
+  return { eligible: true, score, reasons, tier: strong ? 'Strong candidate' : 'Needs review' };
 }
 
 export function findCandidates(records) {
@@ -161,7 +198,15 @@ function connectedGroups(records, decisions) {
 }
 
 export function canApprove(records, decisions, candidate) {
-  if (!candidate || !candidate.left || !candidate.right) return { ok: false, reason: 'Invalid candidate' };
+  if (!candidate || !candidate.left || !candidate.right ||
+      candidate.id !== `${candidate.left}|${candidate.right}`) {
+    return { ok: false, reason: 'Invalid candidate' };
+  }
+  const a = records.find(record => record.uid === candidate.left);
+  const b = records.find(record => record.uid === candidate.right);
+  if (!a || !b || !scoreMatch(a, b).eligible) {
+    return { ok: false, reason: 'Only proposed and eligible links can be approved.' };
+  }
   const next = new Map(decisions);
   next.set(candidate.id, 'approved');
   const groups = connectedGroups(records, next);

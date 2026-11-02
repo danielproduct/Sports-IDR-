@@ -2,6 +2,8 @@
 
 A **no-subscription, no-backend** football identity-resolution demonstration using a fictional club, fictional players and three synthetic data sources. The goal is to test whether a small club could link duplicate scouting, match and trialist records through explicit, auditable human decisions.
 
+![Collins Cross FC demo desktop dashboard](docs/desktop-preview.png)
+
 > **Not production-ready.** There is no authentication, database, persistent ID assignment, access control, multi-tenancy, encrypted storage or GDPR-compliant production data handling. Do **not** import real personal data.
 
 ## Run locally
@@ -28,9 +30,9 @@ Visit http://127.0.0.1:4173 in your browser.
 
 **All changes are in browser memory** and disappear when the page is refreshed. Nothing is sent to a server. The tiny Node.js server serves only local static files and listens on 127.0.0.1.
 
-## Where to keep it
+## Repository and privacy
 
-Source repository: [`danielproduct/Sports-IDR-`](https://github.com/danielproduct/Sports-IDR-), using **Collins Cross FC** as the fictional demonstration club. The repository is currently **public**, so only original, synthetic data and source files belong here. **No hosting or deployment is part of this POC.**
+Source repository: [`danielproduct/Sports-IDR-`](https://github.com/danielproduct/Sports-IDR-). This repository was **public** when the validation work was started. The published code contains synthetic data only. For private development, change repository visibility in GitHub settings; do not add any personal or confidential club records. **No hosting or deployment is part of this POC.**
 
 ## Tests
 
@@ -39,7 +41,7 @@ npm test
 npm run check
 ```
 
-Tests cover identity aliases, DOB collisions, missing data, candidate scoring, transitive-conflict rejection, source integrity, CSV validation and export.
+Tests cover identity aliases, DOB collisions, missing data, candidate scoring, transitive-conflict rejection, source integrity, CSV validation and export. Added labelled challenge/holdout cases, pairwise precision and recall, and review safety checks.
 
 ## Data format
 
@@ -54,20 +56,28 @@ Required: `source_id`, `name`. DOB is optional, otherwise `YYYY-MM-DD`. Each sou
 
 ## Simplifying assumptions
 
+- The `external_id` field is a person-level identifier in a **shared namespace** for the demo. Source-specific IDs must remain in `source_id`.
+
 - Only **adult fictional football players**; not coaches, academy children or medical records.
 - No purchased sporting data or external AI models.
 - Suggestions use deterministic heuristics and are **not calibrated probabilities**.
 - A match score is supporting evidence, **never authorisation for automatic linkage**.
-- Only cross-source candidate links are suggested, with DOB and external-ID contradictions blocked.
+- Primarily cross-source suggestions; same-source duplicates may be suggested only with matching DOB and strong name evidence. DOB and shared external-ID contradictions remain blocked.
 - Club IDs are **provisional display references**, not durable identifiers. For production, persist UUIDs and record-level identity decisions in a secured database.
 - The decision log is not durable; all actions are reset on refresh.
 
+## Accuracy validation (synthetic only)
+
+The matching engine has been evaluated against labelled synthetic datasets. Detailed methods, findings and unresolved risks are in [`docs/accuracy-validation.md`](docs/accuracy-validation.md). This is **not** a real-world accuracy claim. The score in the UI is not a probability.
+
+Run `npm run benchmark` for a concise report or `npm run benchmark:json` for machine-readable output.
+
 ## Next validation steps
 
-1. Have a football person verify whether the candidate suggestions are understandable and appropriately cautious.
-2. Create a known-answer synthetic evaluation set and measure **false-positive links**, recall and the number of manual reviews.
-3. Decide whether the review flow creates enough value before introducing database, accounts or hosting.
-4. Only then consider real-data onboarding, legal bases, tenancy isolation, access controls, data retention and UK/EU processing requirements.
+1. Have an experienced football reviewer test the clarity of suggested links and reasons using fictional data.
+2. Decide whether candidate review reduces administrative work without encouraging incorrect identity merges.
+3. Define the global-versus-source-specific external ID namespace before any real-data integration.
+4. Only after a private, legally appropriate pilot consider database, accounts, hosting, tenancy isolation, data retention and UK/EU processing.
 
 ## Project ownership
 

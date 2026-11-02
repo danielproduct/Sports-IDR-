@@ -39,9 +39,17 @@ test('same name with conflicting DOB is blocked even at exact name similarity', 
   assert.equal(scoreMatch(scout, other).conflict, true);
 });
 
-test('same-source records never generate candidates', () => {
+test('same-source distinct rows with matching DOB are suggested, never auto-linked', () => {
   const other = record('Scouting', '2', 'Joseph Taylor', '1999-02-14');
-  assert.equal(scoreMatch(scout, other).eligible, false);
+  assert.equal(scoreMatch(scout, other).eligible, true);
+  assert.equal(scoreMatch(scout, other).tier, 'Needs review');
+  assert.equal(buildRegistry([scout, other], new Map()).length, 2);
+});
+
+test('same-source duplicates missing DOB are not suggested', () => {
+  const first = record('Scouting', '10', 'Joseph Taylor');
+  const other = record('Scouting', '11', 'Joseph Taylor');
+  assert.equal(scoreMatch(first, other).eligible, false);
 });
 
 test('missing DOB produces a candidate with a lower, cautious score', () => {
@@ -127,4 +135,41 @@ test('registry exports source lineage and provisional club IDs', () => {
   const csv = exportRegistry([scout, match], new Map([[candidate.id, 'approved']]));
   assert.match(csv, /club_identity_id,source,source_id/);
   assert.equal((csv.match(/CCF-\d{6}/g) || []).length, 2);
+});
+
+test('similar names without DOB are withheld from the review queue', () => {
+  const a = record('Scouting', '21', 'Sofia James');
+  const b = record('Matches', '21', 'Sonia James');
+  assert.equal(scoreMatch(a, b).eligible, false);
+});
+
+test('matching DOB and surname allows a first initial, but only as Needs review', () => {
+  const a = record('Scouting', '22', 'James McCarthy', '2000-05-10');
+  const b = record('Matches', '22', 'J. McCarthy', '2000-05-10');
+  const result = scoreMatch(a, b);
+  assert.equal(result.eligible, true);
+  assert.equal(result.tier, 'Needs review');
+});
+
+test('matching shared ID and DOB permits a surname change for manual review', () => {
+  const a = { ...record('Scouting', '23', 'Grace Murphy', '1998-02-08'), external_id: 'GLOBAL-9001' };
+  const b = { ...record('Matches', '23', "Grace O'Neil", '1998-02-08'), external_id: 'GLOBAL-9001' };
+  const result = scoreMatch(a, b);
+  assert.equal(result.eligible, true);
+  assert.equal(result.tier, 'Needs review');
+});
+
+test('a reviewer cannot approve a forged, unproposed or unknown candidate', () => {
+  const a = record('Scouting', '24', 'Arthur Bell', '2000-01-01');
+  const b = record('Matches', '24', 'Nina Chapman', '2000-01-01');
+  const fake = { id: `${a.uid}|${b.uid}`, left: a.uid, right: b.uid };
+  assert.equal(canApprove([a, b], new Map(), fake).ok, false);
+  assert.equal(canApprove([a, b], new Map(), { ...fake, id:'not-a-pair' }).ok, false);
+  assert.equal(canApprove([a], new Map(), fake).ok, false);
+});
+
+test('missing DOB and inconsistent middle names need independent evidence', () => {
+  const a = record('Scouting', '25', 'Aaron T Parker');
+  const b = record('Matches', '25', 'Aaron B Parker');
+  assert.equal(scoreMatch(a, b).eligible, false);
 });
