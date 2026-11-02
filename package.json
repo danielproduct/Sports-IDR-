@@ -1,0 +1,13 @@
+{
+  "name": "collins-cross-fc-idr-poc",
+  "version": "0.1.0",
+  "description": "Local-only, synthetic-data football identity-resolution proof of concept",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test",
+    "check": "node --check engine.js && node --check sample-data.js && node --check app.js && node --check server.mjs && npm test"
+  },
+  "engines": { "node": ">=20" }
+}
